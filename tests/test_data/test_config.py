@@ -53,17 +53,23 @@ class TestYamlConfig:
 
 
 class TestRiskConfig:
-    def test_effective_daily_loss(self):
+    def test_daily_loss_percentage(self):
         risk = RiskConfig()
-        assert risk.effective_daily_loss_limit == 1500.0  # 1750 - 250
+        # 3% of $10K = $300
+        assert risk.daily_loss_limit(10000.0) == 300.0
 
-    def test_effective_drawdown(self):
+    def test_weekly_loss_percentage(self):
         risk = RiskConfig()
-        assert risk.effective_drawdown_limit == 4000.0  # 4500 - 500
+        # 5% of $10K = $500
+        assert risk.weekly_loss_limit(10000.0) == 500.0
 
     def test_max_contracts_default(self):
         risk = RiskConfig()
         assert risk.max_contracts == 4
+
+    def test_account_size_default(self):
+        risk = RiskConfig()
+        assert risk.account_size == 10000
 
 
 class TestNQConfig:
@@ -96,14 +102,14 @@ class TestAppConfig:
 
     def test_default_symbols(self):
         config = AppConfig()
-        assert config.symbols.primary == "NQU5"
-        assert config.symbols.smt_compare == "ESU5"
+        assert config.symbols.primary == "MNQU5"
+        assert config.symbols.smt_compare == "MESU5"
 
     def test_kill_zones(self):
         config = AppConfig()
         assert config.kill_zones.ny_open.start == "09:30"
         assert config.kill_zones.ny_open.end == "11:00"
-        assert config.kill_zones.no_entry_cutoff == "14:30"
+        assert config.kill_zones.overnight.label == "Overnight/Asia"
 
     def test_signal_weights_sum(self):
         config = AppConfig()

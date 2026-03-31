@@ -79,18 +79,15 @@ class SignalAggregator:
     ) -> TradeSignal | None:
         """Evaluate all signals and produce a trade signal if conditions align.
 
-        Returns None if no signal meets the minimum confidence threshold
-        or if time/kill zone constraints prevent entry.
+        Returns None if no signal meets the minimum confidence threshold.
+        Kill zones and time-of-day affect confidence but do NOT block entries.
+        Overnight holds are allowed.
         """
         if now is None:
             now = datetime.now(timezone.utc)
 
-        # Gate 1: Can we enter at all?
-        if not self._kz.can_enter_new_trade(now):
-            return None
-
-        # Gate 2: Enough time for a trade?
-        if not self._kz.has_enough_time(now, self._avg_trade_duration_min):
+        # Only block during CME maintenance halt
+        if self._kz.is_maintenance_halt(now):
             return None
 
         # Determine primary direction from ICT signals
@@ -145,26 +142,12 @@ class SignalAggregator:
             direction, current_price, atr_value, matching_ict, key_levels
         )
 
-        # Time-adjusted TP
-        time_adjusted_tp_r = self._kz.get_time_adjusted_tp(
-            self._full_tp_r, now, self._avg_trade_duration_min
-        )
-        risk = abs(entry_price - stop_loss)
-        if direction == Direction.LONG:
-            time_adjusted_tp = entry_price + risk * time_adjusted_tp_r
-        else:
-            time_adjusted_tp = entry_price - risk * time_adjusted_tp_r
-
-        mins_left = self._kz.minutes_until_close(now)
-
         return TradeSignal(
             direction=direction,
             entry_price=entry_price,
             stop_loss=stop_loss,
             take_profit=take_profit,
-            time_adjusted_tp=time_adjusted_tp,
             confidence=adjusted_confidence,
-            minutes_until_close=mins_left,
             estimated_duration_minutes=self._avg_trade_duration_min,
             strategy_name="ict_aggregated",
             contributing_signals=matching_ict,
@@ -173,7 +156,6 @@ class SignalAggregator:
                 "raw_confidence": raw_confidence,
                 "kill_zone": self._kz.get_active_zone_label(now),
                 "htf_bias": htf_bias.value,
-                "time_adjusted_tp_r": time_adjusted_tp_r,
             },
         )
 

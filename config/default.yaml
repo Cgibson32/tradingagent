@@ -1,4 +1,5 @@
 # AI Trading Agent — Default Configuration
+# Personal Tradovate account, starting with MNQ micros
 # Override per-environment in paper.yaml or live.yaml
 
 # ── Tradovate API ──────────────────────────────────────
@@ -18,8 +19,8 @@ tradovate:
 
 # ── Symbols ────────────────────────────────────────────
 symbols:
-  primary: "NQU5"        # Current front-month NQ contract (update quarterly)
-  smt_compare: "ESU5"    # ES contract for SMT divergence (not traded)
+  primary: "MNQU5"       # MNQ micro — starting instrument (update quarterly)
+  smt_compare: "MESU5"   # MES micro for SMT divergence (not traded)
   intermarket:           # Tracked for context, not traded
     - "DXU5"             # US Dollar Index futures
     - "VXQ5"             # VIX futures
@@ -37,16 +38,18 @@ timeframes:
     - "1d"
 
 # ── Trading Session (all times ET) ─────────────────────
+# CME Globex: Sun 5:00 PM – Fri 4:00 PM ET
+# Daily maintenance halt: 4:00–5:00 PM ET
 session:
-  trading_start: "09:30"
-  trading_end: "16:00"
-  close_all_time: "15:45"
-  no_new_entries_after: "15:00"
-  tighten_stops_time: "15:30"
-  daily_reset_time: "18:00"
-  eod_drawdown_update: "17:00"
+  globex_open: "17:00"       # Sunday open (ET)
+  globex_close: "16:00"      # Friday close (ET)
+  daily_halt_start: "16:00"  # Daily maintenance halt
+  daily_halt_end: "17:00"
+  daily_reset_time: "17:00"  # Reset daily P&L at maintenance halt
 
-# ── Kill Zones (ET) ───────────────────────────────────
+# ── Kill Zones (ET) — ADVISORY ONLY ──────────────────
+# Kill zones affect confidence scoring but do NOT block entries.
+# Overnight holds are allowed.
 kill_zones:
   london_open:
     start: "02:00"
@@ -64,29 +67,28 @@ kill_zones:
     start: "13:30"
     end: "15:00"
     label: "NY PM Session"
-  confidence_penalty_outside_kz: 0.2  # Subtract from confidence outside kill zones
-  time_decay_start: "13:30"           # Start linear confidence decay
-  no_entry_cutoff: "14:30"            # Zero confidence after this time
+  overnight:
+    start: "17:00"
+    end: "02:00"
+    label: "Overnight/Asia"
+  confidence_penalty_outside_kz: 0.15  # Subtract from confidence outside kill zones
 
-# ── Risk Management (Tradeify 150K Select Daily) ──────
+# ── Risk Management (Personal Account) ───────────────
 risk:
-  # Per-trade
+  # Per-trade (percentage-based — scales with equity)
   risk_per_trade_pct: 0.01      # 1% of account per trade
   min_risk_reward: 2.5           # Minimum R:R for entry
-  max_risk_per_trade_pct: 0.015  # Hard ceiling 1.5% (immutable)
+  max_risk_per_trade_pct: 0.02   # 2% hard ceiling
 
   # Position limits
-  max_contracts: 4               # Conservative self-imposed limit (Tradeify allows 12)
+  max_contracts: 4               # Max MNQ contracts at starting balance
   max_concurrent_positions: 2
   max_trades_per_day: 6
 
-  # Daily / drawdown limits
-  max_daily_loss: 1750.0
-  daily_loss_buffer: 250.0       # Stop at $1,500 effective
-  max_trailing_drawdown: 4500.0
-  drawdown_safety_buffer: 500.0  # Stop at $4,000 effective
-  drawdown_lock_threshold: 100.0 # Locks when equity reaches start + $100
-  account_size: 150000
+  # Daily / weekly loss limits (percentage-based)
+  max_daily_loss_pct: 0.03       # 3% of equity → stop for the day
+  max_weekly_loss_pct: 0.05      # 5% of equity → stop for the week
+  account_size: 10000            # Starting balance
 
   # Timing
   cooldown_after_loss_minutes: 15
@@ -98,13 +100,33 @@ risk:
   max_consecutive_losses: 3      # Pause after N consecutive losses
   volatility_shift_atr_multiple: 2.0  # Reduce size when ATR doubles
 
-# ── NQ Contract Specifics ─────────────────────────────
+# ── Contract Specifications ──────────────────────────
+# MNQ (Micro Nasdaq-100) — primary instrument
+mnq:
+  tick_size: 0.25
+  tick_value: 0.50
+  point_value: 2.00
+  commission_per_contract: 0.62
+  slippage_ticks: 2
+  day_margin: 1700               # Approximate day trading margin
+  overnight_margin: 2100         # Approximate overnight margin
+
+# NQ (Full Nasdaq-100) — scale up at $25K+
 nq:
   tick_size: 0.25
   tick_value: 5.00
   point_value: 20.00
   commission_per_contract: 0.82
   slippage_ticks: 2
+  day_margin: 17000
+  overnight_margin: 21000
+
+# ── Auto-Scaling (MNQ → NQ) ─────────────────────────
+scaling:
+  mnq_to_nq_threshold: 25000    # Switch to NQ at this equity level
+  nq_primary_threshold: 50000   # Use NQ as default above this equity
+  max_mnq_contracts: 4           # Max MNQ contracts (at $10K)
+  max_nq_contracts: 2            # Max NQ contracts (at $25K+)
 
 # ── LLM (Claude API) ─────────────────────────────────
 llm:
@@ -181,3 +203,4 @@ features:
   shadow_runner_enabled: false
   llm_enabled: true
   paper_mode: true               # Must run in paper mode first
+  overnight_holds: true          # Allow holding positions overnight

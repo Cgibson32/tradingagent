@@ -33,11 +33,11 @@ class PaperTradingClient:
 
     def __init__(
         self,
-        initial_balance: float = 150000.0,
-        commission_per_contract: float = 0.82,
+        initial_balance: float = 10000.0,
+        commission_per_contract: float = 0.62,
         slippage_ticks: int = 2,
-        tick_value: float = 5.0,
-        point_value: float = 20.0,
+        tick_value: float = 0.50,
+        point_value: float = 2.0,
     ):
         self._balance = initial_balance
         self._initial_balance = initial_balance

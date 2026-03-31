@@ -58,14 +58,13 @@ def sample_signal():
 @pytest.fixture
 def sample_state():
     return MarketState(
-        symbol="NQU5",
+        symbol="MNQU5",
         current_price=20100.0,
         regime=MarketRegime.TRENDING_BULLISH,
         regime_confidence=0.8,
-        equity=150000.0,
-        daily_pnl=200.0,
-        drawdown_floor=145600.0,
-        trades_today=2,
+        equity=10000.0,
+        daily_pnl=50.0,
+        trades_today=1,
         consecutive_losses=0,
     )
 
@@ -120,9 +119,9 @@ class TestSignalEvaluator:
     @pytest.mark.asyncio
     async def test_fallback_rejects_consecutive_losses(self, evaluator, sample_signal):
         state = MarketState(
-            symbol="NQU5", current_price=20100.0,
+            symbol="MNQU5", current_price=20100.0,
             regime=MarketRegime.TRENDING_BULLISH,
-            equity=150000.0, consecutive_losses=2,
+            equity=10000.0, consecutive_losses=2,
         )
         evaluator._claude.ask = AsyncMock(return_value={"error": "Timeout", "fallback": True})
         result = await evaluator.evaluate(sample_signal, state)

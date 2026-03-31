@@ -78,11 +78,10 @@ def signal_evaluation_prompt(
     Called on every signal that passes the aggregator threshold.
     """
     system = (
-        "You are a conservative NQ futures trading advisor for a Tradeify 150K prop firm account. "
+        "You are a conservative MNQ/NQ futures trading advisor for a personal $10K Tradovate account. "
         "Capital preservation is priority #1. You must respond ONLY with valid JSON. "
-        "CRITICAL RULE: A trade entered with insufficient time to reach its target is a BAD trade "
-        "regardless of setup quality. If minutes_until_close < estimated_trade_duration * 1.5, "
-        "you MUST reject."
+        "Overnight holds are allowed — evaluate setups on their own merit regardless of time of day. "
+        "However, note that kill zone timing affects setup probability (NY Open is highest probability)."
     )
 
     user = f"""Evaluate this trade signal and decide whether to approve, reject, or modify it.

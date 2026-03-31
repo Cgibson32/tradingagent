@@ -7,6 +7,7 @@ tradovate:
 risk:
   max_contracts: 2               # Extra conservative in paper mode
   max_trades_per_day: 4          # Limit trades while testing
+  account_size: 10000
 
 features:
   paper_mode: true

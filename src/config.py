@@ -74,13 +74,11 @@ class TradovateConfig(BaseModel):
 
 
 class SessionConfig(BaseModel):
-    trading_start: str = "09:30"
-    trading_end: str = "16:00"
-    close_all_time: str = "15:45"
-    no_new_entries_after: str = "15:00"
-    tighten_stops_time: str = "15:30"
-    daily_reset_time: str = "18:00"
-    eod_drawdown_update: str = "17:00"
+    globex_open: str = "17:00"        # Sunday open (ET)
+    globex_close: str = "16:00"       # Friday close (ET)
+    daily_halt_start: str = "16:00"   # Daily maintenance halt
+    daily_halt_end: str = "17:00"
+    daily_reset_time: str = "17:00"   # Reset daily P&L at maintenance halt
 
 
 class KillZoneWindow(BaseModel):
@@ -102,24 +100,22 @@ class KillZonesConfig(BaseModel):
     ny_pm: KillZoneWindow = Field(
         default_factory=lambda: KillZoneWindow(start="13:30", end="15:00", label="NY PM Session")
     )
-    confidence_penalty_outside_kz: float = 0.2
-    time_decay_start: str = "13:30"
-    no_entry_cutoff: str = "14:30"
+    overnight: KillZoneWindow = Field(
+        default_factory=lambda: KillZoneWindow(start="17:00", end="02:00", label="Overnight/Asia")
+    )
+    confidence_penalty_outside_kz: float = 0.15
 
 
 class RiskConfig(BaseModel):
     risk_per_trade_pct: float = 0.01
     min_risk_reward: float = 2.5
-    max_risk_per_trade_pct: float = 0.015
+    max_risk_per_trade_pct: float = 0.02   # 2% hard ceiling
     max_contracts: int = 4
     max_concurrent_positions: int = 2
     max_trades_per_day: int = 6
-    max_daily_loss: float = 1750.0
-    daily_loss_buffer: float = 250.0
-    max_trailing_drawdown: float = 4500.0
-    drawdown_safety_buffer: float = 500.0
-    drawdown_lock_threshold: float = 100.0
-    account_size: int = 150000
+    max_daily_loss_pct: float = 0.03       # 3% of equity
+    max_weekly_loss_pct: float = 0.05      # 5% of equity
+    account_size: int = 10000
     cooldown_after_loss_minutes: int = 15
     news_blackout_minutes: int = 15
     flash_crash_atr_multiple: float = 5.0
@@ -127,21 +123,66 @@ class RiskConfig(BaseModel):
     max_consecutive_losses: int = 3
     volatility_shift_atr_multiple: float = 2.0
 
-    @property
-    def effective_daily_loss_limit(self) -> float:
-        return self.max_daily_loss - self.daily_loss_buffer
+    def daily_loss_limit(self, equity: float) -> float:
+        """Calculate dollar daily loss limit from percentage."""
+        return equity * self.max_daily_loss_pct
 
-    @property
-    def effective_drawdown_limit(self) -> float:
-        return self.max_trailing_drawdown - self.drawdown_safety_buffer
+    def weekly_loss_limit(self, equity: float) -> float:
+        """Calculate dollar weekly loss limit from percentage."""
+        return equity * self.max_weekly_loss_pct
 
 
-class NQConfig(BaseModel):
+class ContractConfig(BaseModel):
+    """Contract specifications for a futures instrument."""
+
     tick_size: float = 0.25
+    tick_value: float = 0.50
+    point_value: float = 2.00
+    commission_per_contract: float = 0.62
+    slippage_ticks: int = 2
+    day_margin: float = 1700.0
+    overnight_margin: float = 2100.0
+
+
+class NQConfig(ContractConfig):
+    """Full-size NQ contract specs."""
+
     tick_value: float = 5.00
     point_value: float = 20.00
     commission_per_contract: float = 0.82
-    slippage_ticks: int = 2
+    day_margin: float = 17000.0
+    overnight_margin: float = 21000.0
+
+
+class MNQConfig(ContractConfig):
+    """Micro NQ contract specs (1/10th of NQ)."""
+
+    tick_value: float = 0.50
+    point_value: float = 2.00
+    commission_per_contract: float = 0.62
+    day_margin: float = 1700.0
+    overnight_margin: float = 2100.0
+
+
+class ScalingConfig(BaseModel):
+    """Auto-scaling thresholds for MNQ → NQ transition."""
+
+    mnq_to_nq_threshold: float = 25000.0  # Can use NQ above this equity
+    nq_primary_threshold: float = 50000.0  # Use NQ as default above this
+    max_mnq_contracts: int = 4
+    max_nq_contracts: int = 2
+
+    def get_instrument(self, equity: float) -> str:
+        """Return 'mnq' or 'nq' based on current equity."""
+        if equity >= self.nq_primary_threshold:
+            return "nq"
+        return "mnq"
+
+    def get_max_contracts(self, equity: float) -> int:
+        """Return max contracts for the current instrument tier."""
+        if equity >= self.nq_primary_threshold:
+            return self.max_nq_contracts
+        return self.max_mnq_contracts
 
 
 class LLMConfig(BaseModel):
@@ -216,11 +257,12 @@ class FeaturesConfig(BaseModel):
     shadow_runner_enabled: bool = False
     llm_enabled: bool = True
     paper_mode: bool = True
+    overnight_holds: bool = True
 
 
 class SymbolsConfig(BaseModel):
-    primary: str = "NQU5"
-    smt_compare: str = "ESU5"
+    primary: str = "MNQU5"
+    smt_compare: str = "MESU5"
     intermarket: list[str] = Field(default_factory=lambda: ["DXU5", "VXQ5", "ZNU5"])
 
 
@@ -260,7 +302,9 @@ class AppConfig(BaseModel):
     session: SessionConfig = Field(default_factory=SessionConfig)
     kill_zones: KillZonesConfig = Field(default_factory=KillZonesConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    mnq: MNQConfig = Field(default_factory=MNQConfig)
     nq: NQConfig = Field(default_factory=NQConfig)
+    scaling: ScalingConfig = Field(default_factory=ScalingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     signals: SignalConfig = Field(default_factory=SignalConfig)
     trade: TradeConfig = Field(default_factory=TradeConfig)
