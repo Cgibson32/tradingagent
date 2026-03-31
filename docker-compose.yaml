@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  agent:
+    build: .
+    container_name: nq-trading-agent
+    command: python -m src.main --mode paper
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    container_name: nq-dashboard
+    command: streamlit run src/dashboard/app.py --server.port 8501 --server.headless true
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    depends_on:
+      - agent
+    restart: unless-stopped
