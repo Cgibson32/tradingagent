@@ -1,16 +1,15 @@
-"""Shadow/paper comparison runner for A/B testing strategy variants.
+"""A/B testing framework — shadow strategy vs live strategy.
 
-Runs two strategy configurations simultaneously:
-- Live: executes real orders
-- Shadow: paper-only, logged but not executed
-
-Compares performance to identify improvements before deploying.
+Runs two strategy configs simultaneously. Shadow trades are logged
+but never executed. Compares performance to validate changes.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
+import aiosqlite
 import structlog
 
 from src.feedback.analytics import PerformanceAnalytics
@@ -19,108 +18,59 @@ logger = structlog.get_logger(__name__)
 
 
 class ShadowRunner:
-    """A/B testing framework for strategy parameter variants.
+    """Runs a shadow strategy alongside live for A/B testing."""
 
-    The shadow strategy receives identical market data but uses different
-    parameters. Its signals are evaluated and logged but never executed.
-    """
-
-    def __init__(self, shadow_params: dict | None = None):
-        self._shadow_params = shadow_params or {}
-        self._shadow_trades: list[dict] = []
+    def __init__(self, db_path: str = "data/trading.db"):
+        self._db_path = db_path
         self._analytics = PerformanceAnalytics()
-        self._enabled = False
 
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
-    @property
-    def shadow_trades(self) -> list[dict]:
-        return self._shadow_trades
-
-    def enable(self, params: dict) -> None:
-        """Enable shadow runner with alternative parameters."""
-        self._shadow_params = params
-        self._enabled = True
-        logger.info("shadow_runner.enabled", params=params)
-
-    def disable(self) -> None:
-        self._enabled = False
-        logger.info("shadow_runner.disabled")
-
-    def record_shadow_signal(
-        self,
-        symbol: str,
-        direction: str,
-        entry_price: float,
-        stop_loss: float,
-        take_profit: float,
-        confidence: float,
-        strategy_variant: str = "shadow",
+    async def log_shadow_trade(
+        self, symbol: str, direction: str, entry_price: float, exit_price: float,
+        stop_loss: float, take_profit: float, position_size: int,
+        pnl_dollars: float, pnl_r: float, strategy_variant: str, confidence: float,
     ) -> None:
-        """Record a shadow signal (would-be trade)."""
-        self._shadow_trades.append({
-            "symbol": symbol,
-            "direction": direction,
-            "entry_price": entry_price,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "signal_confidence": confidence,
-            "strategy_name": strategy_variant,
-            "entry_time": datetime.now(timezone.utc).isoformat(),
-            "status": "open",
-            "pnl_r": None,
-            "pnl_dollars": None,
-        })
+        trade_id = f"shadow_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """INSERT INTO shadow_trades
+                   (id, symbol, direction, entry_time, exit_time, entry_price,
+                    exit_price, position_size, stop_loss, take_profit,
+                    pnl_dollars, pnl_r, strategy_variant, confidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (trade_id, symbol, direction, now, now, entry_price, exit_price,
+                 position_size, stop_loss, take_profit, pnl_dollars, pnl_r,
+                 strategy_variant, confidence),
+            )
+            await db.commit()
+        logger.info("shadow.logged", variant=strategy_variant, pnl=round(pnl_dollars, 2))
 
-    def close_shadow_trade(self, index: int, exit_price: float, pnl_r: float, pnl_dollars: float) -> None:
-        """Close a shadow trade with its outcome."""
-        if 0 <= index < len(self._shadow_trades):
-            trade = self._shadow_trades[index]
-            trade["exit_price"] = exit_price
-            trade["exit_time"] = datetime.now(timezone.utc).isoformat()
-            trade["pnl_r"] = pnl_r
-            trade["pnl_dollars"] = pnl_dollars
-            trade["status"] = "win" if pnl_r > 0 else "loss"
+    async def get_shadow_trades(self, limit: int = 50) -> list[dict]:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM shadow_trades ORDER BY entry_time DESC LIMIT ?", (limit,))
+            return [dict(row) for row in await cursor.fetchall()]
 
-    def compare(self, live_trades: list[dict]) -> dict:
-        """Compare shadow vs live performance.
+    async def compare_performance(self, live_trades: list[dict]) -> dict:
+        shadow_trades = await self.get_shadow_trades(100)
+        if not live_trades or not shadow_trades:
+            return {"error": "Insufficient data for comparison"}
 
-        Returns comparison metrics and a recommendation.
-        """
-        live_metrics = self._analytics.calculate_metrics(live_trades)
-        shadow_metrics = self._analytics.calculate_metrics(
-            [t for t in self._shadow_trades if t.get("status") in ("win", "loss")]
+        live_m = self._analytics.calculate_metrics(live_trades)
+        shadow_m = self._analytics.calculate_metrics(shadow_trades)
+
+        shadow_better = (
+            shadow_m.get("profit_factor", 0) > live_m.get("profit_factor", 0) * 1.2
+            and shadow_m.get("win_rate", 0) > live_m.get("win_rate", 0)
+            and shadow_m.get("total_trades", 0) >= 10
         )
 
-        live_wr = live_metrics.get("win_rate", 0)
-        shadow_wr = shadow_metrics.get("win_rate", 0)
-        live_pf = live_metrics.get("profit_factor", 0)
-        shadow_pf = shadow_metrics.get("profit_factor", 0)
-
-        # Determine recommendation
-        if shadow_metrics.get("total_trades", 0) < 10:
-            recommendation = "insufficient_data"
-        elif shadow_pf > live_pf * 1.2 and shadow_wr > live_wr:
-            recommendation = "shadow_outperforms"
-        elif live_pf > shadow_pf * 1.2:
-            recommendation = "live_outperforms"
-        else:
-            recommendation = "no_significant_difference"
-
         return {
-            "live": live_metrics,
-            "shadow": shadow_metrics,
-            "shadow_params": self._shadow_params,
-            "recommendation": recommendation,
-            "summary": (
-                f"Live: {live_wr}% WR, {live_pf} PF | "
-                f"Shadow: {shadow_wr}% WR, {shadow_pf} PF | "
-                f"Recommendation: {recommendation}"
-            ),
+            "live": {"trades": live_m.get("total_trades", 0), "win_rate": live_m.get("win_rate", 0),
+                     "profit_factor": live_m.get("profit_factor", 0), "total_pnl": live_m.get("total_pnl", 0)},
+            "shadow": {"trades": shadow_m.get("total_trades", 0), "win_rate": shadow_m.get("win_rate", 0),
+                       "profit_factor": shadow_m.get("profit_factor", 0), "total_pnl": shadow_m.get("total_pnl", 0)},
+            "shadow_outperforms": shadow_better,
+            "recommendation": "Consider switching to shadow parameters" if shadow_better else "Keep current parameters",
         }
-
-    def reset(self) -> None:
-        """Reset shadow trades for a new comparison period."""
-        self._shadow_trades = []

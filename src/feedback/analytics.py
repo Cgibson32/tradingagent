@@ -1,14 +1,14 @@
 """Performance analytics engine.
 
-Calculates comprehensive metrics from trade history:
+Calculates comprehensive trading metrics from the trade journal:
 - Per-trade: R-multiple, duration, MAE, MFE
-- Rolling: win rate, avg R, profit factor, Sharpe, Sortino
-- Segmented: by regime, time of day, day of week, signal type
+- Rolling: win rate, profit factor, Sharpe, Sortino, max drawdown
+- Segmented: by regime, time of day, day of week, signal type, confidence
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -18,183 +18,107 @@ logger = structlog.get_logger(__name__)
 
 
 class PerformanceAnalytics:
-    """Calculates and tracks performance metrics from trade history."""
+    """Calculates and reports trading performance metrics."""
 
-    def calculate_metrics(self, trades: list[dict]) -> dict:
-        """Calculate comprehensive metrics from a list of trade dicts.
-
-        Args:
-            trades: List of trade dicts with keys: pnl_r, pnl_dollars,
-                   entry_time, exit_time, direction, status, etc.
-
-        Returns:
-            Dict of performance metrics.
-        """
+    def calculate_metrics(self, trades: list[dict]) -> dict[str, Any]:
         if not trades:
-            return {"total_trades": 0, "message": "No trades to analyze"}
+            return {"error": "No trades", "total_trades": 0}
 
         df = pd.DataFrame(trades)
-
-        # Filter to closed trades only
         closed = df[df["status"].isin(["win", "loss", "breakeven"])].copy()
         if len(closed) == 0:
-            return {"total_trades": 0, "message": "No closed trades"}
+            return {"error": "No closed trades", "total_trades": 0}
 
-        # Ensure numeric types
-        closed["pnl_r"] = pd.to_numeric(closed["pnl_r"], errors="coerce").fillna(0)
-        closed["pnl_dollars"] = pd.to_numeric(closed["pnl_dollars"], errors="coerce").fillna(0)
+        for col in ["pnl_dollars", "pnl_r", "fees"]:
+            if col in closed.columns:
+                closed[col] = pd.to_numeric(closed[col], errors="coerce").fillna(0)
 
-        wins = closed[closed["pnl_r"] > 0]
-        losses = closed[closed["pnl_r"] <= 0]
-
+        wins = closed[closed["pnl_dollars"] > 0]
+        losses = closed[closed["pnl_dollars"] < 0]
         total = len(closed)
-        win_count = len(wins)
-        loss_count = len(losses)
-        win_rate = win_count / total if total > 0 else 0
 
-        avg_win = wins["pnl_r"].mean() if len(wins) > 0 else 0
-        avg_loss = abs(losses["pnl_r"].mean()) if len(losses) > 0 else 0
+        avg_win = wins["pnl_dollars"].mean() if len(wins) > 0 else 0
+        avg_loss = abs(losses["pnl_dollars"].mean()) if len(losses) > 0 else 0
+        avg_win_r = wins["pnl_r"].mean() if len(wins) > 0 else 0
+        avg_loss_r = abs(losses["pnl_r"].mean()) if len(losses) > 0 else 0
 
         gross_profit = wins["pnl_dollars"].sum() if len(wins) > 0 else 0
         gross_loss = abs(losses["pnl_dollars"].sum()) if len(losses) > 0 else 0
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
 
-        # Equity curve and drawdown
         equity = closed["pnl_dollars"].cumsum()
-        max_dd = self._max_drawdown(equity)
+        peak = equity.cummax()
+        max_drawdown = (peak - equity).max()
 
-        # Sharpe and Sortino (annualized)
         returns = closed["pnl_r"]
-        sharpe = (returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else 0
+        sharpe = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
         downside = returns[returns < 0]
-        sortino = (returns.mean() / downside.std() * np.sqrt(252)) if len(downside) > 0 and downside.std() > 0 else 0
+        sortino = (returns.mean() / downside.std()) * np.sqrt(252) if len(downside) > 0 and downside.std() > 0 else 0
 
-        # Streaks
-        max_win_streak, max_loss_streak = self._calculate_streaks(closed["pnl_r"])
+        durations = []
+        if "entry_time" in closed.columns and "exit_time" in closed.columns:
+            for _, row in closed.iterrows():
+                if row.get("entry_time") and row.get("exit_time"):
+                    try:
+                        durations.append((pd.to_datetime(row["exit_time"]) - pd.to_datetime(row["entry_time"])).total_seconds() / 60)
+                    except Exception:
+                        pass
 
         return {
-            "total_trades": total,
-            "wins": win_count,
-            "losses": loss_count,
-            "win_rate": round(win_rate * 100, 1),
-            "avg_win_r": round(float(avg_win), 2),
-            "avg_loss_r": round(float(avg_loss), 2),
-            "profit_factor": round(float(profit_factor), 2),
-            "total_pnl_r": round(float(returns.sum()), 2),
-            "total_pnl_dollars": round(float(closed["pnl_dollars"].sum()), 2),
-            "max_drawdown_dollars": round(float(max_dd), 2),
-            "sharpe_ratio": round(float(sharpe), 2),
-            "sortino_ratio": round(float(sortino), 2),
-            "max_win_r": round(float(returns.max()), 2),
-            "max_loss_r": round(float(returns.min()), 2),
-            "max_win_streak": max_win_streak,
-            "max_loss_streak": max_loss_streak,
-            "avg_trade_r": round(float(returns.mean()), 2),
+            "total_trades": total, "wins": len(wins), "losses": len(losses),
+            "win_rate": round(len(wins) / total * 100, 1),
+            "avg_win_dollars": round(avg_win, 2), "avg_loss_dollars": round(avg_loss, 2),
+            "avg_win_r": round(avg_win_r, 2), "avg_loss_r": round(avg_loss_r, 2),
+            "max_win": round(closed["pnl_dollars"].max(), 2),
+            "max_loss": round(closed["pnl_dollars"].min(), 2),
+            "profit_factor": round(profit_factor, 2),
+            "total_pnl": round(closed["pnl_dollars"].sum(), 2),
+            "total_fees": round(closed["fees"].sum() if "fees" in closed.columns else 0, 2),
+            "net_pnl": round(closed["pnl_dollars"].sum() - (closed["fees"].sum() if "fees" in closed.columns else 0), 2),
+            "max_drawdown": round(max_drawdown, 2),
+            "sharpe_ratio": round(sharpe, 2), "sortino_ratio": round(sortino, 2),
+            "max_win_streak": self._max_streak(closed["pnl_dollars"] > 0),
+            "max_loss_streak": self._max_streak(closed["pnl_dollars"] <= 0),
+            "avg_duration_minutes": round(np.mean(durations), 1) if durations else 0,
         }
 
-    def rolling_metrics(self, trades: list[dict], window: int = 20) -> dict:
-        """Calculate rolling metrics over the last N trades."""
-        if len(trades) < window:
-            return self.calculate_metrics(trades)
-        return self.calculate_metrics(trades[-window:])
-
-    def segment_by_regime(self, trades: list[dict]) -> dict[str, dict]:
-        """Segment performance by market regime."""
+    def segment_by(self, trades: list[dict], field: str) -> dict[str, dict]:
+        if not trades:
+            return {}
+        df = pd.DataFrame(trades)
+        if field not in df.columns:
+            return {}
         result = {}
-        for trade in trades:
-            regime = trade.get("regime", "unknown")
-            if regime not in result:
-                result[regime] = []
-            result[regime].append(trade)
+        for value, group in df.groupby(field):
+            if pd.isna(value) or value == "":
+                continue
+            result[str(value)] = self.calculate_metrics(group.to_dict("records"))
+        return result
 
-        return {regime: self.calculate_metrics(t) for regime, t in result.items()}
+    def rolling_metrics(self, trades: list[dict], window: int = 20) -> list[dict]:
+        if len(trades) < window:
+            return []
+        return [
+            {**self.calculate_metrics(trades[i - window:i]), "trade_index": i}
+            for i in range(window, len(trades) + 1)
+        ]
 
-    def segment_by_time_of_day(self, trades: list[dict]) -> dict[str, dict]:
-        """Segment performance by time of day (entry hour)."""
-        buckets: dict[str, list] = {}
-        for trade in trades:
-            entry_time = trade.get("entry_time", "")
-            if entry_time:
-                try:
-                    dt = datetime.fromisoformat(entry_time) if isinstance(entry_time, str) else entry_time
-                    hour = dt.hour
-                    bucket = f"{hour:02d}:00-{hour:02d}:59"
-                except (ValueError, AttributeError):
-                    bucket = "unknown"
-            else:
-                bucket = "unknown"
+    def format_summary(self, metrics: dict) -> str:
+        if metrics.get("error"):
+            return f"No data: {metrics['error']}"
+        return (
+            f"Trades: {metrics['total_trades']} ({metrics['wins']}W / {metrics['losses']}L)\n"
+            f"Win Rate: {metrics['win_rate']}%\n"
+            f"Avg Win: ${metrics['avg_win_dollars']:.2f} ({metrics['avg_win_r']:.2f}R) | "
+            f"Avg Loss: ${metrics['avg_loss_dollars']:.2f} ({metrics['avg_loss_r']:.2f}R)\n"
+            f"Profit Factor: {metrics['profit_factor']}\n"
+            f"Total P&L: ${metrics['total_pnl']:.2f} | Max DD: ${metrics['max_drawdown']:.2f}\n"
+            f"Sharpe: {metrics['sharpe_ratio']} | Sortino: {metrics['sortino_ratio']}"
+        )
 
-            if bucket not in buckets:
-                buckets[bucket] = []
-            buckets[bucket].append(trade)
-
-        return {bucket: self.calculate_metrics(t) for bucket, t in buckets.items()}
-
-    def segment_by_strategy(self, trades: list[dict]) -> dict[str, dict]:
-        """Segment performance by strategy name."""
-        buckets: dict[str, list] = {}
-        for trade in trades:
-            strategy = trade.get("strategy_name", "unknown")
-            if strategy not in buckets:
-                buckets[strategy] = []
-            buckets[strategy].append(trade)
-
-        return {s: self.calculate_metrics(t) for s, t in buckets.items()}
-
-    def _max_drawdown(self, equity: pd.Series) -> float:
-        peak = 0.0
-        max_dd = 0.0
-        for val in equity:
-            if val > peak:
-                peak = val
-            dd = peak - val
-            if dd > max_dd:
-                max_dd = dd
-        return max_dd
-
-    def _calculate_streaks(self, pnl_r: pd.Series) -> tuple[int, int]:
-        max_win_streak = 0
-        max_loss_streak = 0
-        current_win = 0
-        current_loss = 0
-
-        for r in pnl_r:
-            if r > 0:
-                current_win += 1
-                current_loss = 0
-                max_win_streak = max(max_win_streak, current_win)
-            else:
-                current_loss += 1
-                current_win = 0
-                max_loss_streak = max(max_loss_streak, current_loss)
-
-        return max_win_streak, max_loss_streak
-
-    def generate_report(self, trades: list[dict]) -> str:
-        """Generate a markdown performance report."""
-        metrics = self.calculate_metrics(trades)
-        if metrics.get("total_trades", 0) == 0:
-            return "# Performance Report\nNo trades to analyze."
-
-        report = f"""# Performance Report
-
-## Overview
-- **Total Trades**: {metrics['total_trades']}
-- **Win Rate**: {metrics['win_rate']}%
-- **Profit Factor**: {metrics['profit_factor']}
-- **Total P&L**: ${metrics['total_pnl_dollars']:,.2f} ({metrics['total_pnl_r']}R)
-
-## Risk Metrics
-- **Sharpe Ratio**: {metrics['sharpe_ratio']}
-- **Sortino Ratio**: {metrics['sortino_ratio']}
-- **Max Drawdown**: ${metrics['max_drawdown_dollars']:,.2f}
-
-## Trade Quality
-- **Avg Win**: {metrics['avg_win_r']}R
-- **Avg Loss**: {metrics['avg_loss_r']}R
-- **Max Win**: {metrics['max_win_r']}R
-- **Max Loss**: {metrics['max_loss_r']}R
-- **Max Win Streak**: {metrics['max_win_streak']}
-- **Max Loss Streak**: {metrics['max_loss_streak']}
-"""
-        return report
+    @staticmethod
+    def _max_streak(condition: pd.Series) -> int:
+        if len(condition) == 0:
+            return 0
+        groups = (condition != condition.shift()).cumsum()
+        return int(condition.groupby(groups).sum().max())
