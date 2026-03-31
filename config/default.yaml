@@ -1,0 +1,183 @@
+# AI Trading Agent — Default Configuration
+# Override per-environment in paper.yaml or live.yaml
+
+# ── Tradovate API ──────────────────────────────────────
+tradovate:
+  environment: demo  # demo or live
+  urls:
+    demo:
+      rest: "https://demo.tradovateapi.com/v1"
+      ws_trading: "wss://demo.tradovateapi.com/v1/websocket"
+      ws_market_data: "wss://md-demo.tradovateapi.com/v1/websocket"
+    live:
+      rest: "https://live.tradovateapi.com/v1"
+      ws_trading: "wss://live.tradovateapi.com/v1/websocket"
+      ws_market_data: "wss://md.tradovateapi.com/v1/websocket"
+  auth:
+    token_renew_minutes: 45  # Renew token this many minutes before expiry (tokens last 60min)
+
+# ── Symbols ────────────────────────────────────────────
+symbols:
+  primary: "NQU5"        # Current front-month NQ contract (update quarterly)
+  smt_compare: "ESU5"    # ES contract for SMT divergence (not traded)
+  intermarket:           # Tracked for context, not traded
+    - "DXU5"             # US Dollar Index futures
+    - "VXQ5"             # VIX futures
+    - "ZNU5"             # 10-Year Treasury Note futures
+
+# ── Timeframes ─────────────────────────────────────────
+timeframes:
+  entry: "5m"            # Primary entry timeframe
+  htf_bias:
+    - "30m"
+    - "1h"
+  context:
+    - "15m"
+    - "4h"
+    - "1d"
+
+# ── Trading Session (all times ET) ─────────────────────
+session:
+  trading_start: "09:30"
+  trading_end: "16:00"
+  close_all_time: "15:45"
+  no_new_entries_after: "15:00"
+  tighten_stops_time: "15:30"
+  daily_reset_time: "18:00"
+  eod_drawdown_update: "17:00"
+
+# ── Kill Zones (ET) ───────────────────────────────────
+kill_zones:
+  london_open:
+    start: "02:00"
+    end: "05:00"
+    label: "London Open"
+  ny_open:
+    start: "09:30"
+    end: "11:00"
+    label: "NY Open"
+  ny_lunch:
+    start: "12:00"
+    end: "13:30"
+    label: "NY Lunch"
+  ny_pm:
+    start: "13:30"
+    end: "15:00"
+    label: "NY PM Session"
+  confidence_penalty_outside_kz: 0.2  # Subtract from confidence outside kill zones
+  time_decay_start: "13:30"           # Start linear confidence decay
+  no_entry_cutoff: "14:30"            # Zero confidence after this time
+
+# ── Risk Management (Tradeify 150K Select Daily) ──────
+risk:
+  # Per-trade
+  risk_per_trade_pct: 0.01      # 1% of account per trade
+  min_risk_reward: 2.5           # Minimum R:R for entry
+  max_risk_per_trade_pct: 0.015  # Hard ceiling 1.5% (immutable)
+
+  # Position limits
+  max_contracts: 4               # Conservative self-imposed limit (Tradeify allows 12)
+  max_concurrent_positions: 2
+  max_trades_per_day: 6
+
+  # Daily / drawdown limits
+  max_daily_loss: 1750.0
+  daily_loss_buffer: 250.0       # Stop at $1,500 effective
+  max_trailing_drawdown: 4500.0
+  drawdown_safety_buffer: 500.0  # Stop at $4,000 effective
+  drawdown_lock_threshold: 100.0 # Locks when equity reaches start + $100
+  account_size: 150000
+
+  # Timing
+  cooldown_after_loss_minutes: 15
+  news_blackout_minutes: 15      # No trading N minutes before/after high-impact news
+
+  # Circuit breaker
+  flash_crash_atr_multiple: 5.0  # Halt on > 5x ATR move in 5 minutes
+  spread_blowout_multiple: 4.0   # Halt on > 4x normal spread
+  max_consecutive_losses: 3      # Pause after N consecutive losses
+  volatility_shift_atr_multiple: 2.0  # Reduce size when ATR doubles
+
+# ── NQ Contract Specifics ─────────────────────────────
+nq:
+  tick_size: 0.25
+  tick_value: 5.00
+  point_value: 20.00
+  commission_per_contract: 0.82
+  slippage_ticks: 2
+
+# ── LLM (Claude API) ─────────────────────────────────
+llm:
+  realtime_model: "claude-sonnet-4-20250514"
+  analysis_model: "claude-opus-4-6"
+  realtime_timeout_seconds: 10
+  analysis_timeout_seconds: 60
+  daily_budget_usd: 5.00
+  cache_ttl_seconds: 300         # Cache identical prompts for 5 minutes
+  regime_update_interval_minutes: 30
+
+# ── Signal Engine ─────────────────────────────────────
+signals:
+  # Indicator parameters
+  ema_periods: [9, 21, 50, 200]
+  adx_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  rsi_period: 14
+  atr_period: 14
+
+  # ICT pattern detection
+  swing_lookback: 5              # Bars for pivot high/low detection
+  fvg_min_ticks: 4               # Minimum FVG size in ticks
+  displacement_atr_multiple: 2.0 # Candle body > Nx ATR = displacement
+  displacement_lookback: 5       # Max bars after sweep for displacement
+  liquidity_pool_tolerance: 2    # Ticks tolerance for equal highs/lows
+  fvg_max_age_bars: 50           # FVGs expire after N bars
+  max_tracked_fvgs: 20           # Max concurrent FVGs to track
+
+  # Aggregator
+  min_confidence_threshold: 0.65
+  signal_weights:
+    ict_pattern: 0.35
+    htf_bias: 0.20
+    indicators: 0.15
+    order_flow: 0.15
+    key_levels: 0.10
+    intermarket: 0.05
+
+# ── Trade Management ─────────────────────────────────
+trade:
+  partial_tp_r: 1.0              # Take partial profit at 1R
+  partial_tp_pct: 0.50           # Close 50% at partial TP
+  full_tp_r: 2.5                 # Full take profit target
+  trailing_stop_atr_multiple: 1.5
+  limit_order_timeout_minutes: 30
+  break_even_trigger_pct: 0.40   # Move SL to BE at 40% of TP distance
+
+# ── Data Storage ──────────────────────────────────────
+storage:
+  db_path: "data/trading.db"
+  parquet_dir: "data/candles"
+  historical_months: 6           # Fetch this many months of historical data
+  checkpoint_interval_seconds: 60
+
+# ── Notifications ─────────────────────────────────────
+notifications:
+  enabled: false
+  discord_webhook_url: ""
+
+# ── Logging ───────────────────────────────────────────
+logging:
+  level: "INFO"
+  format: "json"
+  rotate_days: 30
+  log_dir: "logs"
+
+# ── Feature Flags ─────────────────────────────────────
+features:
+  order_flow_enabled: true
+  intermarket_enabled: true
+  shadow_runner_enabled: false
+  llm_enabled: true
+  paper_mode: true               # Must run in paper mode first
