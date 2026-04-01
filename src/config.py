@@ -258,6 +258,9 @@ class FeaturesConfig(BaseModel):
     llm_enabled: bool = True
     paper_mode: bool = True
     overnight_holds: bool = True
+    auto_tune_enabled: bool = False
+    auto_tune_max_changes_per_day: int = 3
+    auto_tune_min_trades_required: int = 20
 
 
 class SymbolsConfig(BaseModel):

@@ -13,12 +13,15 @@ Pages:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -252,24 +255,321 @@ elif page == "LLM Log":
 elif page == "Settings":
     st.title("⚙️ Settings")
 
-    st.subheader("Current Configuration")
+    CONFIG_PATH = Path("config/default.yaml")
 
-    config_path = Path("config/default.yaml")
-    if config_path.exists():
-        st.code(config_path.read_text(), language="yaml")
-    else:
-        st.warning("Config file not found.")
+    # Load config into session state
+    if "_cfg" not in st.session_state:
+        if CONFIG_PATH.exists():
+            st.session_state["_cfg"] = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+        else:
+            st.session_state["_cfg"] = {}
 
-    st.subheader("System Status")
-    st.json({
-        "database": "Connected" if Path(DB_PATH).exists() else "Not found",
-        "config": "Loaded" if config_path.exists() else "Missing",
-    })
+    cfg = st.session_state["_cfg"]
 
-    # Checkpoint info
-    checkpoints = run_async(query_db(
-        "SELECT * FROM agent_checkpoints ORDER BY id DESC LIMIT 1"
-    ))
-    if checkpoints:
-        st.subheader("Last Checkpoint")
-        st.json(checkpoints[0])
+    # ── Top controls ──
+    top_col1, top_col2, top_col3 = st.columns([1, 1, 2])
+
+    with top_col1:
+        save_clicked = st.button("💾 Save Changes", type="primary", use_container_width=True)
+    with top_col2:
+        reset_clicked = st.button("↩️ Reset to Defaults", use_container_width=True)
+    with top_col3:
+        auto_tune = cfg.get("features", {}).get("auto_tune_enabled", False)
+        new_auto_tune = st.toggle("🤖 AI Auto-Tune", value=auto_tune,
+                                   help="Allow AI to automatically adjust parameters based on performance analysis")
+        cfg.setdefault("features", {})["auto_tune_enabled"] = new_auto_tune
+
+    validation_errors = []
+
+    # ── 1. Risk Management ──
+    with st.expander("🛡️ Risk Management", expanded=True):
+        risk = cfg.setdefault("risk", {})
+
+        col1, col2 = st.columns(2)
+        with col1:
+            risk["risk_per_trade_pct"] = st.slider(
+                "Risk per Trade (%)", 0.1, 5.0,
+                value=float(risk.get("risk_per_trade_pct", 0.01)) * 100,
+                step=0.1, format="%.1f%%",
+                help="Percentage of account risked on each trade"
+            ) / 100
+
+            risk["max_risk_per_trade_pct"] = st.slider(
+                "Max Risk per Trade (%) — Hard Ceiling", 0.5, 5.0,
+                value=float(risk.get("max_risk_per_trade_pct", 0.02)) * 100,
+                step=0.1, format="%.1f%%",
+                help="Absolute maximum risk, even if AI suggests more"
+            ) / 100
+
+            risk["max_daily_loss_pct"] = st.slider(
+                "Max Daily Loss (%)", 1.0, 10.0,
+                value=float(risk.get("max_daily_loss_pct", 0.03)) * 100,
+                step=0.5, format="%.1f%%",
+                help="Stop trading for the day at this loss level"
+            ) / 100
+
+            risk["max_weekly_loss_pct"] = st.slider(
+                "Max Weekly Loss (%)", 2.0, 15.0,
+                value=float(risk.get("max_weekly_loss_pct", 0.05)) * 100,
+                step=0.5, format="%.1f%%",
+                help="Stop trading for the week at this loss level"
+            ) / 100
+
+        with col2:
+            risk["min_risk_reward"] = st.number_input(
+                "Minimum R:R", min_value=1.0, max_value=5.0,
+                value=float(risk.get("min_risk_reward", 2.5)), step=0.5,
+                help="Minimum risk-reward ratio for entry"
+            )
+            risk["max_contracts"] = st.number_input(
+                "Max Contracts", min_value=1, max_value=20,
+                value=int(risk.get("max_contracts", 4)),
+                help="Maximum contracts per trade"
+            )
+            risk["max_concurrent_positions"] = st.number_input(
+                "Max Concurrent Positions", min_value=1, max_value=10,
+                value=int(risk.get("max_concurrent_positions", 2))
+            )
+            risk["max_trades_per_day"] = st.number_input(
+                "Max Trades per Day", min_value=1, max_value=20,
+                value=int(risk.get("max_trades_per_day", 6)),
+                help="Prevent overtrading"
+            )
+
+        col3, col4 = st.columns(2)
+        with col3:
+            risk["cooldown_after_loss_minutes"] = st.number_input(
+                "Cooldown After Loss (min)", min_value=0, max_value=120,
+                value=int(risk.get("cooldown_after_loss_minutes", 15))
+            )
+        with col4:
+            risk["news_blackout_minutes"] = st.number_input(
+                "News Blackout (min)", min_value=0, max_value=60,
+                value=int(risk.get("news_blackout_minutes", 15)),
+                help="No trading N minutes before/after high-impact news"
+            )
+
+        st.markdown("**Circuit Breaker**")
+        cb1, cb2 = st.columns(2)
+        with cb1:
+            risk["flash_crash_atr_multiple"] = st.number_input(
+                "Flash Crash ATR Multiple", min_value=2.0, max_value=10.0,
+                value=float(risk.get("flash_crash_atr_multiple", 5.0)), step=0.5
+            )
+            risk["max_consecutive_losses"] = st.number_input(
+                "Max Consecutive Losses", min_value=1, max_value=10,
+                value=int(risk.get("max_consecutive_losses", 3))
+            )
+        with cb2:
+            risk["spread_blowout_multiple"] = st.number_input(
+                "Spread Blowout Multiple", min_value=2.0, max_value=10.0,
+                value=float(risk.get("spread_blowout_multiple", 4.0)), step=0.5
+            )
+            risk["volatility_shift_atr_multiple"] = st.number_input(
+                "Volatility Shift ATR Multiple", min_value=1.0, max_value=5.0,
+                value=float(risk.get("volatility_shift_atr_multiple", 2.0)), step=0.5
+            )
+
+        # Validation
+        if risk["max_risk_per_trade_pct"] < risk["risk_per_trade_pct"]:
+            validation_errors.append("Max risk per trade must be >= risk per trade")
+            st.error("Max risk per trade must be >= risk per trade")
+
+    # ── 2. Signal Engine ──
+    with st.expander("📡 Signal Engine"):
+        signals = cfg.setdefault("signals", {})
+
+        signals["min_confidence_threshold"] = st.slider(
+            "Min Confidence Threshold", 0.0, 1.0,
+            value=float(signals.get("min_confidence_threshold", 0.65)),
+            step=0.05, help="Minimum confidence score to trigger a trade"
+        )
+
+        st.markdown("**Signal Weights** (must sum to 1.0)")
+        weights = signals.setdefault("signal_weights", {})
+        wc1, wc2 = st.columns(2)
+        with wc1:
+            weights["ict_pattern"] = st.slider("ICT Patterns", 0.0, 1.0, float(weights.get("ict_pattern", 0.35)), 0.05)
+            weights["htf_bias"] = st.slider("HTF Bias", 0.0, 1.0, float(weights.get("htf_bias", 0.20)), 0.05)
+            weights["indicators"] = st.slider("Indicators", 0.0, 1.0, float(weights.get("indicators", 0.15)), 0.05)
+        with wc2:
+            weights["order_flow"] = st.slider("Order Flow", 0.0, 1.0, float(weights.get("order_flow", 0.15)), 0.05)
+            weights["key_levels"] = st.slider("Key Levels", 0.0, 1.0, float(weights.get("key_levels", 0.10)), 0.05)
+            weights["intermarket"] = st.slider("Intermarket", 0.0, 1.0, float(weights.get("intermarket", 0.05)), 0.05)
+
+        total_weight = sum(weights.values())
+        if abs(total_weight - 1.0) < 0.011:
+            st.success(f"Total weight: {total_weight:.2f} ✓")
+        else:
+            st.error(f"Total weight: {total_weight:.2f} — must equal 1.0")
+            validation_errors.append("Signal weights must sum to 1.0")
+
+        st.markdown("**Indicator Periods**")
+        ip1, ip2, ip3 = st.columns(3)
+        with ip1:
+            signals["adx_period"] = st.number_input("ADX Period", 5, 30, int(signals.get("adx_period", 14)))
+            signals["rsi_period"] = st.number_input("RSI Period", 5, 30, int(signals.get("rsi_period", 14)))
+        with ip2:
+            signals["atr_period"] = st.number_input("ATR Period", 5, 30, int(signals.get("atr_period", 14)))
+            signals["swing_lookback"] = st.number_input("Swing Lookback", 2, 20, int(signals.get("swing_lookback", 5)))
+        with ip3:
+            signals["fvg_min_ticks"] = st.number_input("FVG Min Ticks", 1, 20, int(signals.get("fvg_min_ticks", 4)))
+            signals["displacement_atr_multiple"] = st.number_input("Displacement ATR Mult", 1.0, 5.0, float(signals.get("displacement_atr_multiple", 2.0)), 0.5)
+
+    # ── 3. Trade Management ──
+    with st.expander("💹 Trade Management"):
+        trade = cfg.setdefault("trade", {})
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            trade["partial_tp_r"] = st.number_input("Partial TP (R)", 0.5, 3.0, float(trade.get("partial_tp_r", 1.0)), 0.5)
+            trade["full_tp_r"] = st.number_input("Full TP (R)", 1.0, 5.0, float(trade.get("full_tp_r", 2.5)), 0.5)
+            trade["trailing_stop_atr_multiple"] = st.number_input("Trailing Stop ATR Mult", 0.5, 4.0, float(trade.get("trailing_stop_atr_multiple", 1.5)), 0.25)
+        with tc2:
+            trade["partial_tp_pct"] = st.slider("Partial TP Close %", 10, 90, int(float(trade.get("partial_tp_pct", 0.5)) * 100), 5, format="%d%%") / 100
+            trade["break_even_trigger_pct"] = st.slider("Break-Even Trigger %", 10, 80, int(float(trade.get("break_even_trigger_pct", 0.4)) * 100), 5, format="%d%%") / 100
+            trade["limit_order_timeout_minutes"] = st.number_input("Limit Order Timeout (min)", 5, 120, int(trade.get("limit_order_timeout_minutes", 30)))
+
+        if trade["partial_tp_r"] >= trade["full_tp_r"]:
+            st.error("Partial TP must be less than Full TP")
+            validation_errors.append("Partial TP must be less than Full TP")
+
+    # ── 4. Auto-Scaling ──
+    with st.expander("📈 Auto-Scaling (MNQ → NQ)"):
+        scaling = cfg.setdefault("scaling", {})
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            scaling["mnq_to_nq_threshold"] = st.number_input(
+                "MNQ → NQ Threshold ($)", 10000, 100000,
+                int(scaling.get("mnq_to_nq_threshold", 25000)), 5000,
+                help="Allow NQ trades above this equity"
+            )
+            scaling["max_mnq_contracts"] = st.number_input("Max MNQ Contracts", 1, 20, int(scaling.get("max_mnq_contracts", 4)))
+        with sc2:
+            scaling["nq_primary_threshold"] = st.number_input(
+                "NQ Primary Threshold ($)", 20000, 200000,
+                int(scaling.get("nq_primary_threshold", 50000)), 5000,
+                help="Default to NQ above this equity"
+            )
+            scaling["max_nq_contracts"] = st.number_input("Max NQ Contracts", 1, 10, int(scaling.get("max_nq_contracts", 2)))
+
+        if scaling["nq_primary_threshold"] <= scaling["mnq_to_nq_threshold"]:
+            st.error("NQ Primary threshold must be > MNQ→NQ threshold")
+            validation_errors.append("NQ Primary threshold must be > MNQ→NQ threshold")
+
+    # ── 5. AI / Claude ──
+    with st.expander("🤖 AI / Claude API"):
+        llm = cfg.setdefault("llm", {})
+        lc1, lc2 = st.columns(2)
+        with lc1:
+            llm["daily_budget_usd"] = st.number_input("Daily Budget ($)", 0.0, 50.0, float(llm.get("daily_budget_usd", 5.0)), 1.0)
+            llm["realtime_timeout_seconds"] = st.number_input("Realtime Timeout (s)", 1, 60, int(llm.get("realtime_timeout_seconds", 10)))
+            llm["cache_ttl_seconds"] = st.number_input("Cache TTL (s)", 0, 3600, int(llm.get("cache_ttl_seconds", 300)), 60)
+        with lc2:
+            llm["analysis_timeout_seconds"] = st.number_input("Analysis Timeout (s)", 10, 300, int(llm.get("analysis_timeout_seconds", 60)))
+            llm["regime_update_interval_minutes"] = st.number_input("Regime Update Interval (min)", 5, 120, int(llm.get("regime_update_interval_minutes", 30)))
+        st.caption(f"Models: {llm.get('realtime_model', 'N/A')} (realtime) / {llm.get('analysis_model', 'N/A')} (analysis) — :orange[restart required to change]")
+
+    # ── 6. Kill Zones ──
+    with st.expander("⏰ Kill Zones (Advisory)"):
+        kz = cfg.setdefault("kill_zones", {})
+        kz["confidence_penalty_outside_kz"] = st.slider(
+            "Confidence Penalty Outside Kill Zones", 0.0, 0.5,
+            float(kz.get("confidence_penalty_outside_kz", 0.15)), 0.05
+        )
+        st.caption("Kill zones affect confidence scoring but do NOT block entries. Overnight holds allowed.")
+        for zone_key in ["london_open", "ny_open", "ny_lunch", "ny_pm", "overnight"]:
+            zone = kz.setdefault(zone_key, {})
+            zc1, zc2, zc3 = st.columns([2, 1, 1])
+            with zc1:
+                zone["label"] = st.text_input(f"Label", zone.get("label", zone_key), key=f"kz_{zone_key}_label")
+            with zc2:
+                zone["start"] = st.text_input(f"Start (HH:MM)", zone.get("start", "00:00"), key=f"kz_{zone_key}_start")
+            with zc3:
+                zone["end"] = st.text_input(f"End (HH:MM)", zone.get("end", "00:00"), key=f"kz_{zone_key}_end")
+
+    # ── 7. Notifications ──
+    with st.expander("🔔 Notifications"):
+        notif = cfg.setdefault("notifications", {})
+        notif["enabled"] = st.toggle("Enable Discord Notifications", value=bool(notif.get("enabled", False)))
+        if notif["enabled"]:
+            notif["discord_webhook_url"] = st.text_input(
+                "Discord Webhook URL",
+                value=notif.get("discord_webhook_url", ""),
+                type="password"
+            )
+
+    # ── 8. Feature Flags ──
+    with st.expander("🚩 Feature Flags"):
+        features = cfg.setdefault("features", {})
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            features["paper_mode"] = st.toggle("Paper Mode", value=bool(features.get("paper_mode", True)),
+                                                help="Must be ON for simulator. :orange[Restart required]")
+            features["llm_enabled"] = st.toggle("LLM Enabled", value=bool(features.get("llm_enabled", True)),
+                                                 help="Enable Claude AI for decisions. :orange[Restart required]")
+            features["order_flow_enabled"] = st.toggle("Order Flow", value=bool(features.get("order_flow_enabled", True)))
+        with fc2:
+            features["intermarket_enabled"] = st.toggle("Intermarket", value=bool(features.get("intermarket_enabled", True)))
+            features["shadow_runner_enabled"] = st.toggle("Shadow Runner (A/B)", value=bool(features.get("shadow_runner_enabled", False)),
+                                                           help=":orange[Restart required]")
+            features["overnight_holds"] = st.toggle("Overnight Holds", value=bool(features.get("overnight_holds", True)))
+
+        st.markdown("**Auto-Tune Settings**")
+        features["auto_tune_max_changes_per_day"] = st.number_input(
+            "Max Auto-Tune Changes/Day", 1, 10, int(features.get("auto_tune_max_changes_per_day", 3))
+        )
+        features["auto_tune_min_trades_required"] = st.number_input(
+            "Min Trades Before Tuning", 5, 100, int(features.get("auto_tune_min_trades_required", 20))
+        )
+
+    # ── 9. System Info + AI Tuning History ──
+    with st.expander("📊 System Info"):
+        si1, si2 = st.columns(2)
+        with si1:
+            st.markdown("**Environment**")
+            st.code(cfg.get("tradovate", {}).get("environment", "demo"))
+            st.markdown("**Primary Symbol**")
+            st.code(cfg.get("symbols", {}).get("primary", "MNQU5"))
+            st.markdown("**Database**")
+            st.code("Connected" if Path(DB_PATH).exists() else "Not found")
+        with si2:
+            st.markdown("**MNQ Specs**")
+            mnq = cfg.get("mnq", {})
+            st.json({"tick_value": mnq.get("tick_value", 0.5), "point_value": mnq.get("point_value", 2.0),
+                      "commission": mnq.get("commission_per_contract", 0.62), "overnight_margin": mnq.get("overnight_margin", 2100)})
+            st.markdown("**NQ Specs**")
+            nq = cfg.get("nq", {})
+            st.json({"tick_value": nq.get("tick_value", 5.0), "point_value": nq.get("point_value", 20.0),
+                      "commission": nq.get("commission_per_contract", 0.82), "overnight_margin": nq.get("overnight_margin", 21000)})
+
+    with st.expander("🧠 AI Tuning History"):
+        adjustments = run_async(query_db(
+            "SELECT * FROM strategy_adjustments ORDER BY id DESC LIMIT 20"
+        ))
+        if adjustments:
+            for adj in adjustments:
+                applied = "✅ Applied" if adj.get("applied") else "📋 Suggested"
+                st.markdown(f"**[{adj.get('created_at', '')[:10]}] {applied}** — {adj.get('review_type', '')}")
+                st.caption(adj.get("adjustment_text", ""))
+                if adj.get("parameters_json"):
+                    try:
+                        st.json(json.loads(adj["parameters_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                st.divider()
+        else:
+            st.info("No tuning history yet. Enable Auto-Tune and trade for the AI to start optimizing.")
+
+    # ── Save / Reset logic ──
+    if save_clicked:
+        if validation_errors:
+            st.error(f"Cannot save — {len(validation_errors)} error(s): {', '.join(validation_errors)}")
+        else:
+            CONFIG_PATH.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+            st.success("Settings saved to config/default.yaml")
+            st.balloons()
+
+    if reset_clicked:
+        if CONFIG_PATH.exists():
+            st.session_state["_cfg"] = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+            st.rerun()

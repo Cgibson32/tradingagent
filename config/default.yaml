@@ -204,3 +204,6 @@ features:
   llm_enabled: true
   paper_mode: true               # Must run in paper mode first
   overnight_holds: true          # Allow holding positions overnight
+  auto_tune_enabled: false       # AI self-tuning (off by default, enable via dashboard)
+  auto_tune_max_changes_per_day: 3
+  auto_tune_min_trades_required: 20

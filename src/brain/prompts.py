@@ -220,6 +220,65 @@ def weekly_review_prompt(
   ],
   "strategy_notes": "forward-looking guidance for next week",
   "risk_management_notes": "any concerns about risk"
-}}"""
+}}
+
+IMPORTANT: For parameter_adjustments, use ONLY these parameter names:
+- min_confidence_threshold (0.50-0.90)
+- risk_per_trade_pct (0.005-0.03)
+- trailing_stop_atr_multiple (0.5-3.0)
+- partial_tp_pct (0.25-0.75)
+- full_tp_r (1.5-4.0)
+- break_even_trigger_pct (0.2-0.6)
+- confidence_penalty_outside_kz (0.0-0.3)
+
+Only suggest changes where the data clearly supports it. Small incremental changes are preferred over large jumps."""
+
+    return system, user
+
+
+def daily_tuning_prompt(
+    todays_trades: str,
+    todays_metrics: str,
+    current_params: str,
+    recent_adjustments: str,
+) -> tuple[str, str]:
+    """Build a lighter daily tuning prompt for incremental parameter tweaks.
+
+    Called at end of each trading day. Uses Sonnet for speed/cost.
+    """
+    system = (
+        "You are a quantitative analyst reviewing today's MNQ futures trading performance. "
+        "Suggest small, incremental parameter tweaks based on today's data. "
+        "Be conservative — only suggest changes with clear evidence. "
+        "Respond ONLY with valid JSON."
+    )
+
+    user = f"""Review today's trading session and suggest any parameter tweaks.
+
+## Today's Trades
+{todays_trades}
+
+## Today's Metrics
+{todays_metrics}
+
+## Current Parameters
+{current_params}
+
+## Recent Adjustments (last 5)
+{recent_adjustments}
+
+## Respond with this exact JSON schema:
+{{
+  "daily_assessment": "one sentence summary of today's performance",
+  "should_adjust": true | false,
+  "parameter_adjustments": [
+    {{"parameter": "name", "current": value, "suggested": value, "reasoning": "why"}}
+  ],
+  "notes": "any observations for the weekly review"
+}}
+
+IMPORTANT: Only suggest adjustments if today's data clearly warrants it.
+If the strategy performed as expected, set should_adjust to false and return empty parameter_adjustments.
+Valid parameters: min_confidence_threshold, risk_per_trade_pct, trailing_stop_atr_multiple, partial_tp_pct, full_tp_r, break_even_trigger_pct"""
 
     return system, user
