@@ -36,6 +36,105 @@ import aiosqlite
 
 DB_PATH = "data/trading.db"
 
+# ── Professional CSS (taste-skill inspired minimalism) ──
+CUSTOM_CSS = """<style>
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+[data-testid="stAppViewContainer"] > .main { animation: fadeInUp 0.4s ease-out; }
+h1 {
+    font-weight: 700 !important; letter-spacing: -0.02em !important;
+    color: #111111 !important; font-size: 1.75rem !important;
+    padding-bottom: 0.5rem !important; border-bottom: 1px solid #EAEAEA;
+    margin-bottom: 1.5rem !important;
+}
+h2, [data-testid="stSubheader"] {
+    font-weight: 600 !important; color: #2F3437 !important;
+    font-size: 1.15rem !important; margin-top: 1.5rem !important;
+}
+[data-testid="stSidebar"] {
+    background-color: #FAFAF9 !important; border-right: 1px solid #EAEAEA !important;
+}
+[data-testid="stMetric"] {
+    background: #FFFFFF; border: 1px solid #EAEAEA; border-radius: 8px;
+    padding: 1rem 1.25rem; transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+[data-testid="stMetric"]:hover {
+    border-color: #D0D0D0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+[data-testid="stMetric"] label {
+    font-size: 0.75rem !important; font-weight: 600 !important;
+    text-transform: uppercase !important; letter-spacing: 0.05em !important;
+    color: #787774 !important;
+}
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-size: 1.5rem !important; font-weight: 700 !important; color: #111111 !important;
+}
+[data-testid="stDataFrame"] {
+    border: 1px solid #EAEAEA; border-radius: 8px; overflow: hidden;
+}
+[data-testid="stExpander"] {
+    border: 1px solid #EAEAEA !important; border-radius: 8px !important;
+    margin-bottom: 0.75rem !important;
+}
+[data-testid="stExpander"] summary {
+    font-weight: 600 !important; color: #2F3437 !important;
+    transition: background-color 0.15s ease;
+}
+[data-testid="stExpander"] summary:hover { background-color: #FAFAF9 !important; }
+.stButton > button {
+    border-radius: 6px !important; font-weight: 600 !important;
+    font-size: 0.85rem !important; padding: 0.5rem 1.25rem !important;
+    transition: all 0.15s ease !important; box-shadow: none !important;
+    border: 1px solid #EAEAEA !important;
+}
+.stButton > button[data-testid="stBaseButton-primary"] {
+    background-color: #111111 !important; color: #FFFFFF !important;
+    border: 1px solid #111111 !important;
+}
+.stButton > button[data-testid="stBaseButton-primary"]:hover {
+    background-color: #2F3437 !important;
+}
+hr { border: none !important; border-top: 1px solid #EAEAEA !important; margin: 1.5rem 0 !important; }
+[data-testid="stJson"] {
+    background: #FAFAF9 !important; border: 1px solid #EAEAEA !important; border-radius: 6px !important;
+}
+[data-testid="stVegaLiteChart"], [data-testid="stArrowVegaLiteChart"] {
+    border: 1px solid #EAEAEA; border-radius: 8px; padding: 0.5rem;
+}
+.block-container { padding-top: 2rem !important; max-width: 1100px !important; }
+.metric-card {
+    background: #FFFFFF; border: 1px solid #EAEAEA; border-radius: 8px;
+    padding: 1.25rem 1.5rem; transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    animation: fadeInUp 0.5s ease-out both;
+}
+.metric-card:hover { border-color: #D0D0D0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.metric-card .metric-label {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #787774; margin-bottom: 0.35rem;
+}
+.metric-card .metric-value { font-size: 1.6rem; font-weight: 700; color: #111111; line-height: 1.2; }
+.metric-card .metric-delta { font-size: 0.8rem; font-weight: 500; margin-top: 0.25rem; }
+.metric-card .metric-delta.positive { color: #2D7A4F; }
+.metric-card .metric-delta.negative { color: #C4473A; }
+.metric-card .metric-delta.neutral  { color: #787774; }
+.status-badge {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 4px;
+    font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; margin-right: 0.5rem;
+}
+.status-badge.win       { background: #E8F5E9; color: #2D7A4F; }
+.status-badge.loss      { background: #FFEBEE; color: #C4473A; }
+.status-badge.breakeven { background: #FFF8E1; color: #9A8C3B; }
+.status-badge.open      { background: #E3F2FD; color: #1565C0; }
+</style>"""
+
+
+def mc(label: str, value: str, delta: str = "", delta_class: str = "neutral") -> str:
+    """Return HTML for a premium metric card."""
+    d = f'<div class="metric-delta {delta_class}">{delta}</div>' if delta else ""
+    return f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div>{d}</div>'
+
 
 def run_async(coro):
     """Run async function in sync context."""
@@ -62,7 +161,8 @@ async def query_db(sql: str, params: tuple = ()) -> list[dict]:
 
 
 # ── Page Config ──
-st.set_page_config(page_title="AI Trading Agent", page_icon="📈", layout="wide")
+st.set_page_config(page_title="AI Trading Agent", page_icon=":chart_with_upwards_trend:", layout="wide")
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # ── Sidebar Navigation ──
 page = st.sidebar.radio("Navigation", ["Live View", "Trade History", "Analytics", "LLM Log", "Settings"])
@@ -70,9 +170,8 @@ page = st.sidebar.radio("Navigation", ["Live View", "Trade History", "Analytics"
 
 # ── Live View ──
 if page == "Live View":
-    st.title("📈 Live View")
+    st.title("Live View")
 
-    # Account summary
     col1, col2, col3, col4 = st.columns(4)
 
     daily_stats = run_async(query_db(
@@ -85,20 +184,30 @@ if page == "Live View":
         daily_pnl = latest.get("total_pnl", 0)
         trades_today = latest.get("trades_taken", 0)
         win_rate = latest.get("win_rate", 0)
+        dc = "positive" if daily_pnl >= 0 else "negative"
 
-        col1.metric("Equity", f"${equity:,.2f}")
-        col2.metric("Daily P&L", f"${daily_pnl:+,.2f}",
-                     delta=f"{daily_pnl:+.2f}", delta_color="normal")
-        col3.metric("Trades Today", trades_today)
-        col4.metric("Win Rate", f"{win_rate:.0%}" if isinstance(win_rate, float) else "N/A")
+        with col1:
+            st.markdown(mc("Equity", f"${equity:,.2f}"), unsafe_allow_html=True)
+        with col2:
+            st.markdown(mc("Daily P&L", f"${daily_pnl:+,.2f}", f"{daily_pnl:+.2f}", dc), unsafe_allow_html=True)
+        with col3:
+            st.markdown(mc("Trades Today", str(trades_today)), unsafe_allow_html=True)
+        with col4:
+            wr = f"{win_rate:.0%}" if isinstance(win_rate, float) else "N/A"
+            st.markdown(mc("Win Rate", wr), unsafe_allow_html=True)
     else:
-        col1.metric("Equity", "$10,000.00")
-        col2.metric("Daily P&L", "$0.00")
-        col3.metric("Trades Today", 0)
-        col4.metric("Win Rate", "N/A")
+        with col1:
+            st.markdown(mc("Equity", "$10,000.00"), unsafe_allow_html=True)
+        with col2:
+            st.markdown(mc("Daily P&L", "$0.00"), unsafe_allow_html=True)
+        with col3:
+            st.markdown(mc("Trades Today", "0"), unsafe_allow_html=True)
+        with col4:
+            st.markdown(mc("Win Rate", "N/A"), unsafe_allow_html=True)
 
     # Recent trades
     st.subheader("Recent Trades")
+    # Status badge summary
     trades = run_async(query_db(
         """SELECT t.*, tc.regime, tc.strategy_name, tc.signal_confidence
            FROM trades t LEFT JOIN trade_context tc ON t.id = tc.trade_id
@@ -110,7 +219,12 @@ if page == "Live View":
         display_cols = ["id", "symbol", "direction", "status", "entry_price",
                         "exit_price", "pnl_dollars", "pnl_r", "regime", "strategy_name"]
         available = [c for c in display_cols if c in df.columns]
-        st.dataframe(df[available], use_container_width=True)
+        # Status badges
+        if "status" in df.columns:
+            counts = df["status"].value_counts().to_dict()
+            badges = " ".join(f'<span class="status-badge {k}">{k}: {v}</span>' for k, v in counts.items())
+            st.markdown(f'<div style="margin-bottom:0.75rem">{badges}</div>', unsafe_allow_html=True)
+        st.dataframe(df[available], use_container_width=True, hide_index=True)
     else:
         st.info("No trades recorded yet. Start the agent to begin trading.")
 
@@ -128,7 +242,7 @@ if page == "Live View":
 
 # ── Trade History ──
 elif page == "Trade History":
-    st.title("📋 Trade History")
+    st.title("Trade History")
 
     trades = run_async(query_db(
         """SELECT t.*, tc.regime, tc.strategy_name, tc.signal_confidence
@@ -151,7 +265,7 @@ elif page == "Trade History":
         mask = df["status"].isin(status_filter) & df["direction"].isin(direction_filter)
         filtered = df[mask]
 
-        st.dataframe(filtered, use_container_width=True)
+        st.dataframe(filtered, use_container_width=True, hide_index=True)
 
         # Equity curve
         closed = filtered[filtered["status"].isin(["win", "loss", "breakeven"])].copy()
@@ -168,7 +282,7 @@ elif page == "Trade History":
 
 # ── Analytics ──
 elif page == "Analytics":
-    st.title("📊 Analytics")
+    st.title("Analytics")
 
     trades = run_async(query_db(
         """SELECT t.*, tc.regime, tc.strategy_name, tc.signal_confidence
@@ -182,18 +296,28 @@ elif page == "Analytics":
         analytics = PerformanceAnalytics()
         metrics = analytics.calculate_metrics(trades)
 
-        # Key metrics
+        # Key metrics - Row 1
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Trades", metrics["total_trades"])
-        col2.metric("Win Rate", f"{metrics['win_rate']}%")
-        col3.metric("Profit Factor", metrics["profit_factor"])
-        col4.metric("Sharpe Ratio", metrics["sharpe_ratio"])
+        with col1:
+            st.markdown(mc("Total Trades", str(metrics["total_trades"])), unsafe_allow_html=True)
+        with col2:
+            st.markdown(mc("Win Rate", f"{metrics['win_rate']}%"), unsafe_allow_html=True)
+        with col3:
+            st.markdown(mc("Profit Factor", str(metrics["profit_factor"])), unsafe_allow_html=True)
+        with col4:
+            st.markdown(mc("Sharpe Ratio", str(metrics["sharpe_ratio"])), unsafe_allow_html=True)
 
+        # Row 2
         col5, col6, col7, col8 = st.columns(4)
-        col5.metric("Total P&L", f"${metrics['total_pnl']:.2f}")
-        col6.metric("Max Drawdown", f"${metrics['max_drawdown']:.2f}")
-        col7.metric("Avg Win", f"{metrics['avg_win_r']:.2f}R")
-        col8.metric("Avg Loss", f"{metrics['avg_loss_r']:.2f}R")
+        pnl_c = "positive" if metrics["total_pnl"] >= 0 else "negative"
+        with col5:
+            st.markdown(mc("Total P&L", f"${metrics['total_pnl']:.2f}", delta_class=pnl_c), unsafe_allow_html=True)
+        with col6:
+            st.markdown(mc("Max Drawdown", f"${metrics['max_drawdown']:.2f}"), unsafe_allow_html=True)
+        with col7:
+            st.markdown(mc("Avg Win", f"{metrics['avg_win_r']:.2f}R"), unsafe_allow_html=True)
+        with col8:
+            st.markdown(mc("Avg Loss", f"{metrics['avg_loss_r']:.2f}R"), unsafe_allow_html=True)
 
         # R-multiple distribution
         st.subheader("R-Multiple Distribution")
@@ -210,14 +334,14 @@ elif page == "Analytics":
                  "PF": m["profit_factor"], "P&L": m["total_pnl"]}
                 for r, m in regime_segments.items()
             ])
-            st.dataframe(regime_df, use_container_width=True)
+            st.dataframe(regime_df, use_container_width=True, hide_index=True)
     else:
         st.info("No completed trades for analysis.")
 
 
 # ── LLM Log ──
 elif page == "LLM Log":
-    st.title("🤖 LLM Decision Log")
+    st.title("LLM Decision Log")
 
     decisions = run_async(query_db(
         "SELECT * FROM ai_decisions ORDER BY timestamp DESC LIMIT 50"
@@ -227,8 +351,11 @@ elif page == "LLM Log":
         # Usage summary
         total_cost = sum(d.get("cost_usd", 0) or 0 for d in decisions)
         total_tokens = sum(d.get("tokens_used", 0) or 0 for d in decisions)
-        st.metric("Total API Cost (shown)", f"${total_cost:.4f}")
-        st.metric("Total Tokens (shown)", f"{total_tokens:,}")
+        lc1, lc2 = st.columns(2)
+        with lc1:
+            st.markdown(mc("Total API Cost", f"${total_cost:.4f}"), unsafe_allow_html=True)
+        with lc2:
+            st.markdown(mc("Total Tokens", f"{total_tokens:,}"), unsafe_allow_html=True)
 
         for d in decisions:
             ts = d.get("timestamp", "")[:19]
@@ -253,7 +380,7 @@ elif page == "LLM Log":
 
 # ── Settings ──
 elif page == "Settings":
-    st.title("⚙️ Settings")
+    st.title("Settings")
 
     CONFIG_PATH = Path("config/default.yaml")
 
@@ -270,19 +397,19 @@ elif page == "Settings":
     top_col1, top_col2, top_col3 = st.columns([1, 1, 2])
 
     with top_col1:
-        save_clicked = st.button("💾 Save Changes", type="primary", use_container_width=True)
+        save_clicked = st.button("Save Changes", type="primary", use_container_width=True)
     with top_col2:
-        reset_clicked = st.button("↩️ Reset to Defaults", use_container_width=True)
+        reset_clicked = st.button("Reset to Defaults", use_container_width=True)
     with top_col3:
         auto_tune = cfg.get("features", {}).get("auto_tune_enabled", False)
-        new_auto_tune = st.toggle("🤖 AI Auto-Tune", value=auto_tune,
+        new_auto_tune = st.toggle("AI Auto-Tune", value=auto_tune,
                                    help="Allow AI to automatically adjust parameters based on performance analysis")
         cfg.setdefault("features", {})["auto_tune_enabled"] = new_auto_tune
 
     validation_errors = []
 
     # ── 1. Risk Management ──
-    with st.expander("🛡️ Risk Management", expanded=True):
+    with st.expander("Risk Management", expanded=True):
         risk = cfg.setdefault("risk", {})
 
         col1, col2 = st.columns(2)
@@ -376,7 +503,7 @@ elif page == "Settings":
             st.error("Max risk per trade must be >= risk per trade")
 
     # ── 2. Signal Engine ──
-    with st.expander("📡 Signal Engine"):
+    with st.expander("Signal Engine"):
         signals = cfg.setdefault("signals", {})
 
         signals["min_confidence_threshold"] = st.slider(
@@ -417,7 +544,7 @@ elif page == "Settings":
             signals["displacement_atr_multiple"] = st.number_input("Displacement ATR Mult", 1.0, 5.0, float(signals.get("displacement_atr_multiple", 2.0)), 0.5)
 
     # ── 3. Trade Management ──
-    with st.expander("💹 Trade Management"):
+    with st.expander("Trade Management"):
         trade = cfg.setdefault("trade", {})
         tc1, tc2 = st.columns(2)
         with tc1:
@@ -434,7 +561,7 @@ elif page == "Settings":
             validation_errors.append("Partial TP must be less than Full TP")
 
     # ── 4. Auto-Scaling ──
-    with st.expander("📈 Auto-Scaling (MNQ → NQ)"):
+    with st.expander("Auto-Scaling (MNQ to NQ)"):
         scaling = cfg.setdefault("scaling", {})
         sc1, sc2 = st.columns(2)
         with sc1:
@@ -457,7 +584,7 @@ elif page == "Settings":
             validation_errors.append("NQ Primary threshold must be > MNQ→NQ threshold")
 
     # ── 5. AI / Claude ──
-    with st.expander("🤖 AI / Claude API"):
+    with st.expander("AI / Claude API"):
         llm = cfg.setdefault("llm", {})
         lc1, lc2 = st.columns(2)
         with lc1:
@@ -470,7 +597,7 @@ elif page == "Settings":
         st.caption(f"Models: {llm.get('realtime_model', 'N/A')} (realtime) / {llm.get('analysis_model', 'N/A')} (analysis) — :orange[restart required to change]")
 
     # ── 6. Kill Zones ──
-    with st.expander("⏰ Kill Zones (Advisory)"):
+    with st.expander("Kill Zones (Advisory)"):
         kz = cfg.setdefault("kill_zones", {})
         kz["confidence_penalty_outside_kz"] = st.slider(
             "Confidence Penalty Outside Kill Zones", 0.0, 0.5,
@@ -488,7 +615,7 @@ elif page == "Settings":
                 zone["end"] = st.text_input(f"End (HH:MM)", zone.get("end", "00:00"), key=f"kz_{zone_key}_end")
 
     # ── 7. Notifications ──
-    with st.expander("🔔 Notifications"):
+    with st.expander("Notifications"):
         notif = cfg.setdefault("notifications", {})
         notif["enabled"] = st.toggle("Enable Discord Notifications", value=bool(notif.get("enabled", False)))
         if notif["enabled"]:
@@ -499,7 +626,7 @@ elif page == "Settings":
             )
 
     # ── 8. Feature Flags ──
-    with st.expander("🚩 Feature Flags"):
+    with st.expander("Feature Flags"):
         features = cfg.setdefault("features", {})
         fc1, fc2 = st.columns(2)
         with fc1:
@@ -523,7 +650,7 @@ elif page == "Settings":
         )
 
     # ── 9. System Info + AI Tuning History ──
-    with st.expander("📊 System Info"):
+    with st.expander("System Info"):
         si1, si2 = st.columns(2)
         with si1:
             st.markdown("**Environment**")
@@ -542,7 +669,7 @@ elif page == "Settings":
             st.json({"tick_value": nq.get("tick_value", 5.0), "point_value": nq.get("point_value", 20.0),
                       "commission": nq.get("commission_per_contract", 0.82), "overnight_margin": nq.get("overnight_margin", 21000)})
 
-    with st.expander("🧠 AI Tuning History"):
+    with st.expander("AI Tuning History"):
         adjustments = run_async(query_db(
             "SELECT * FROM strategy_adjustments ORDER BY id DESC LIMIT 20"
         ))
@@ -567,7 +694,6 @@ elif page == "Settings":
         else:
             CONFIG_PATH.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
             st.success("Settings saved to config/default.yaml")
-            st.balloons()
 
     if reset_clicked:
         if CONFIG_PATH.exists():
