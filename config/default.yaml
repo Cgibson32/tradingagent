@@ -1,0 +1,209 @@
+# AI Trading Agent — Default Configuration
+# Personal Tradovate account, starting with MNQ micros
+# Override per-environment in paper.yaml or live.yaml
+
+# ── Tradovate API ──────────────────────────────────────
+tradovate:
+  environment: demo  # demo or live
+  urls:
+    demo:
+      rest: "https://demo.tradovateapi.com/v1"
+      ws_trading: "wss://demo.tradovateapi.com/v1/websocket"
+      ws_market_data: "wss://md-demo.tradovateapi.com/v1/websocket"
+    live:
+      rest: "https://live.tradovateapi.com/v1"
+      ws_trading: "wss://live.tradovateapi.com/v1/websocket"
+      ws_market_data: "wss://md.tradovateapi.com/v1/websocket"
+  auth:
+    token_renew_minutes: 45  # Renew token this many minutes before expiry (tokens last 60min)
+
+# ── Symbols ────────────────────────────────────────────
+symbols:
+  primary: "MNQU5"       # MNQ micro — starting instrument (update quarterly)
+  smt_compare: "MESU5"   # MES micro for SMT divergence (not traded)
+  intermarket:           # Tracked for context, not traded
+    - "DXU5"             # US Dollar Index futures
+    - "VXQ5"             # VIX futures
+    - "ZNU5"             # 10-Year Treasury Note futures
+
+# ── Timeframes ─────────────────────────────────────────
+timeframes:
+  entry: "5m"            # Primary entry timeframe
+  htf_bias:
+    - "30m"
+    - "1h"
+  context:
+    - "15m"
+    - "4h"
+    - "1d"
+
+# ── Trading Session (all times ET) ─────────────────────
+# CME Globex: Sun 5:00 PM – Fri 4:00 PM ET
+# Daily maintenance halt: 4:00–5:00 PM ET
+session:
+  globex_open: "17:00"       # Sunday open (ET)
+  globex_close: "16:00"      # Friday close (ET)
+  daily_halt_start: "16:00"  # Daily maintenance halt
+  daily_halt_end: "17:00"
+  daily_reset_time: "17:00"  # Reset daily P&L at maintenance halt
+
+# ── Kill Zones (ET) — ADVISORY ONLY ──────────────────
+# Kill zones affect confidence scoring but do NOT block entries.
+# Overnight holds are allowed.
+kill_zones:
+  london_open:
+    start: "02:00"
+    end: "05:00"
+    label: "London Open"
+  ny_open:
+    start: "09:30"
+    end: "11:00"
+    label: "NY Open"
+  ny_lunch:
+    start: "12:00"
+    end: "13:30"
+    label: "NY Lunch"
+  ny_pm:
+    start: "13:30"
+    end: "15:00"
+    label: "NY PM Session"
+  overnight:
+    start: "17:00"
+    end: "02:00"
+    label: "Overnight/Asia"
+  confidence_penalty_outside_kz: 0.15  # Subtract from confidence outside kill zones
+
+# ── Risk Management (Personal Account) ───────────────
+risk:
+  # Per-trade (percentage-based — scales with equity)
+  risk_per_trade_pct: 0.01      # 1% of account per trade
+  min_risk_reward: 2.5           # Minimum R:R for entry
+  max_risk_per_trade_pct: 0.02   # 2% hard ceiling
+
+  # Position limits
+  max_contracts: 4               # Max MNQ contracts at starting balance
+  max_concurrent_positions: 2
+  max_trades_per_day: 6
+
+  # Daily / weekly loss limits (percentage-based)
+  max_daily_loss_pct: 0.03       # 3% of equity → stop for the day
+  max_weekly_loss_pct: 0.05      # 5% of equity → stop for the week
+  account_size: 10000            # Starting balance
+
+  # Timing
+  cooldown_after_loss_minutes: 15
+  news_blackout_minutes: 15      # No trading N minutes before/after high-impact news
+
+  # Circuit breaker
+  flash_crash_atr_multiple: 5.0  # Halt on > 5x ATR move in 5 minutes
+  spread_blowout_multiple: 4.0   # Halt on > 4x normal spread
+  max_consecutive_losses: 3      # Pause after N consecutive losses
+  volatility_shift_atr_multiple: 2.0  # Reduce size when ATR doubles
+
+# ── Contract Specifications ──────────────────────────
+# MNQ (Micro Nasdaq-100) — primary instrument
+mnq:
+  tick_size: 0.25
+  tick_value: 0.50
+  point_value: 2.00
+  commission_per_contract: 0.62
+  slippage_ticks: 2
+  day_margin: 1700               # Approximate day trading margin
+  overnight_margin: 2100         # Approximate overnight margin
+
+# NQ (Full Nasdaq-100) — scale up at $25K+
+nq:
+  tick_size: 0.25
+  tick_value: 5.00
+  point_value: 20.00
+  commission_per_contract: 0.82
+  slippage_ticks: 2
+  day_margin: 17000
+  overnight_margin: 21000
+
+# ── Auto-Scaling (MNQ → NQ) ─────────────────────────
+scaling:
+  mnq_to_nq_threshold: 25000    # Switch to NQ at this equity level
+  nq_primary_threshold: 50000   # Use NQ as default above this equity
+  max_mnq_contracts: 4           # Max MNQ contracts (at $10K)
+  max_nq_contracts: 2            # Max NQ contracts (at $25K+)
+
+# ── LLM (Claude API) ─────────────────────────────────
+llm:
+  realtime_model: "claude-sonnet-4-20250514"
+  analysis_model: "claude-opus-4-6"
+  realtime_timeout_seconds: 10
+  analysis_timeout_seconds: 60
+  daily_budget_usd: 5.00
+  cache_ttl_seconds: 300         # Cache identical prompts for 5 minutes
+  regime_update_interval_minutes: 30
+
+# ── Signal Engine ─────────────────────────────────────
+signals:
+  # Indicator parameters
+  ema_periods: [9, 21, 50, 200]
+  adx_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  rsi_period: 14
+  atr_period: 14
+
+  # ICT pattern detection
+  swing_lookback: 5              # Bars for pivot high/low detection
+  fvg_min_ticks: 4               # Minimum FVG size in ticks
+  displacement_atr_multiple: 2.0 # Candle body > Nx ATR = displacement
+  displacement_lookback: 5       # Max bars after sweep for displacement
+  liquidity_pool_tolerance: 2    # Ticks tolerance for equal highs/lows
+  fvg_max_age_bars: 50           # FVGs expire after N bars
+  max_tracked_fvgs: 20           # Max concurrent FVGs to track
+
+  # Aggregator
+  min_confidence_threshold: 0.65
+  signal_weights:
+    ict_pattern: 0.35
+    htf_bias: 0.20
+    indicators: 0.15
+    order_flow: 0.15
+    key_levels: 0.10
+    intermarket: 0.05
+
+# ── Trade Management ─────────────────────────────────
+trade:
+  partial_tp_r: 1.0              # Take partial profit at 1R
+  partial_tp_pct: 0.50           # Close 50% at partial TP
+  full_tp_r: 2.5                 # Full take profit target
+  trailing_stop_atr_multiple: 1.5
+  limit_order_timeout_minutes: 30
+  break_even_trigger_pct: 0.40   # Move SL to BE at 40% of TP distance
+
+# ── Data Storage ──────────────────────────────────────
+storage:
+  db_path: "data/trading.db"
+  parquet_dir: "data/candles"
+  historical_months: 6           # Fetch this many months of historical data
+  checkpoint_interval_seconds: 60
+
+# ── Notifications ─────────────────────────────────────
+notifications:
+  enabled: false
+  discord_webhook_url: ""
+
+# ── Logging ───────────────────────────────────────────
+logging:
+  level: "INFO"
+  format: "json"
+  rotate_days: 30
+  log_dir: "logs"
+
+# ── Feature Flags ─────────────────────────────────────
+features:
+  order_flow_enabled: true
+  intermarket_enabled: true
+  shadow_runner_enabled: false
+  llm_enabled: true
+  paper_mode: true               # Must run in paper mode first
+  overnight_holds: true          # Allow holding positions overnight
+  auto_tune_enabled: false       # AI self-tuning (off by default, enable via dashboard)
+  auto_tune_max_changes_per_day: 3
+  auto_tune_min_trades_required: 20

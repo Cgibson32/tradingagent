@@ -1,0 +1,17 @@
+# Paper / Simulator Trading Overrides
+# Merges on top of default.yaml
+
+tradovate:
+  environment: demo
+
+risk:
+  max_contracts: 2               # Extra conservative in paper mode
+  max_trades_per_day: 4          # Limit trades while testing
+  account_size: 10000
+
+features:
+  paper_mode: true
+  shadow_runner_enabled: false
+
+logging:
+  level: "DEBUG"
